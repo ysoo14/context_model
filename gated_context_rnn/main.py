@@ -80,8 +80,7 @@ def train_or_eval_model(device, model, loss_function, dataloader, epoch, optimiz
         lp_ = log_prob.to(device) # batch*seq_len, n_classes
         labels_ = label.view(-1).to(device) # batch*seq_len
         umask = umask.to(device)
-        if train == False:
-            print(torch.sum(umask))
+
         loss = loss_function(lp_, labels_, umask)
 
         pred_ = torch.argmax(lp_,1) # batch*seq_len
@@ -94,7 +93,6 @@ def train_or_eval_model(device, model, loss_function, dataloader, epoch, optimiz
             loss.backward()
             optimizer.step()
         else:
-            print(lp_.shape)
             vids += data[-1]
 
     if preds!=[]:
