@@ -159,7 +159,6 @@ class Model(nn.Module):
         
         self.gate1 = nn.Linear(hidden_size * 2, 100)
         self.gate2 = nn.Linear(hidden_size * 2, 100)
-        self.gate3 = nn.Tanh()
 
         self.dropout = nn.Dropout(dropout_rate)
         self.fc_1 = nn.Linear(100, num_label)
@@ -186,7 +185,7 @@ class Model(nn.Module):
             
             pre_context = self.gate1(pre_context)
             post_context = self.gate2(post_context)
-            context = F.relu(self.gate3(pre_context + post_context))
+            context = F.tanh(pre_context + post_context)
             context = self.dropout(context)
             context = self.fc_1(context)
             logit =F.log_softmax(context, -1)
