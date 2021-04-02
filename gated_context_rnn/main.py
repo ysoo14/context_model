@@ -76,7 +76,7 @@ def train_or_eval_model(device, model, loss_function, dataloader, epoch, optimiz
         textf, umask, label, S = [d.to(device) for d in data[:-1]] if device=='cuda:0' else data[:-1]
 
         # log_prob, alpha, alpha_f, alpha_b = model(torch.cat((textf, acouf, visuf), dim=-1), qmask, umask)
-        log_prob = model(U=textf, umask=umask) # seq_len, batch, n_classes
+        log_prob = model(U=textf, umask=umask, speaker = S) # seq_len, batch, n_classes
         lp_ = log_prob.to(device) # batch*seq_len, n_classes
         labels_ = label.view(-1).to(device) # batch*seq_len
         umask = umask.to(device)

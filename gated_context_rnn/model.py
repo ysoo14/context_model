@@ -139,7 +139,7 @@ class ContextEncoder(nn.Module):
         pos = pos * umask_
         x = x + pos
         transformer_outputs = self.transformer(x, umask)
-        residual_outputs = transformer_outputs[-1] + x
+        residual_outputs = transformer_outputs[-1]
 
         hidden_states, _ = self.lstm(residual_outputs)
         hidden_states = hidden_states
@@ -157,8 +157,9 @@ class Model(nn.Module):
         self.device = device
         self.context_encoder = ContextEncoder(device=device, seq_length=max_length)
         
-        self.gate1 = nn.Linear(hidden_size * 2, 100)
-        self.gate2 = nn.Linear(hidden_size * 2, 100)
+        self.speaker_embedding = nn.Linear(2, hidden_size)
+        self.gate1 = nn.Linear(hidden_size * 2, hidden_size)
+        self.gate2 = nn.Linear(hidden_size * 2, hidden_size)
 
         self.dropout = nn.Dropout(dropout_rate)
         self.fc_1 = nn.Linear(100, num_label)
@@ -168,13 +169,14 @@ class Model(nn.Module):
     def data_preprocess2(self, utterances, idx, umask):
         return utterances[:idx+1], utterances[idx:], utterances[idx], umask[:idx+1], umask[idx:]
     
-    def forward(self, U, umask):
+    def forward(self, U, umask, speaker):
         sentence_length = umask.shape[0]
-        utterances = U
+        speaker_embedding = self.speaker_embedding(speaker.to(self.device))
+        utterances = U.to(self.device) + speaker_embedding.to(self.device)
         logits = torch.zeros(0).type(U.type()) # batch, D_e
         logits = logits.to(self.device)
         umask = umask.to(self.device)
-    
+  
         for idx in range(sentence_length):
             pre_utterances, post_utterances, target_utterances, pre_umask, post_umask = self.data_preprocess2(utterances=utterances, idx=idx, umask=umask)
             pre_utterances=pre_utterances.to(self.device)
