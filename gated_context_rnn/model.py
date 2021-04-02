@@ -70,7 +70,7 @@ class PositionWiseFeedForward(nn.Module): # position-wise feed forward
         return pwff_output
 
 class Block(nn.Module): # encoder block : self-attenton, add&normalize, position-wise feed forward, add&normalize
-    def __init__(self, hidden_size=100, num_heads=4, pwpf_size=400, dropout_rate=0.3):
+    def __init__(self, hidden_size=200, num_heads=8, pwpf_size=800, dropout_rate=0.3):
         super(Block, self).__init__()
         self.attn_layer = Attention(hidden_size=hidden_size, num_heads=num_heads, dropout_rate=dropout_rate)
         self.attn_norm = nn.LayerNorm(hidden_size, eps=1e-12)
@@ -93,7 +93,7 @@ class Block(nn.Module): # encoder block : self-attenton, add&normalize, position
 
 
 class TransformerEncoder(nn.Module): # transformer encoder
-    def __init__(self, num_layer = 6, hidden_size=100, num_heads=4, pwpf_size=400, dropout_rate=0.3):
+    def __init__(self, num_layer = 6, hidden_size=200, num_heads=4, pwpf_size=800, dropout_rate=0.3):
         super(TransformerEncoder, self).__init__()
         self.layer = nn.ModuleList()
 
@@ -111,7 +111,7 @@ class TransformerEncoder(nn.Module): # transformer encoder
         return all_layer_output
 
 class ContextEncoder(nn.Module):
-    def __init__(self, device, seq_length, input_size=100, hidden_size=100):
+    def __init__(self, device, seq_length, input_size=200, hidden_size=200):
         super(ContextEncoder, self).__init__()
         self.device = device
         self.hidden_size = hidden_size
@@ -133,13 +133,13 @@ class ContextEncoder(nn.Module):
     def forward(self, x, umask=None, post=False):
         batch_size = x.shape[1]
         umask_ = umask.unsqueeze(-1)
-        umask_ = umask_.expand(umask.shape[0], batch_size, 100)
+        umask_ = umask_.expand(umask.shape[0], batch_size, 200)
         pos = self.position_encoding_init(x.shape[0], x.shape[2]).to(self.device)
         pos = pos.unsqueeze(0).repeat(batch_size, 1, 1).permute(1,0,2)
         pos = pos * umask_
         x = x + pos
         transformer_outputs = self.transformer(x, umask)
-        residual_outputs = transformer_outputs[-1] + x
+        residual_outputs = transformer_outputs[-1]
 
         hidden_states, _ = self.lstm(residual_outputs)
         hidden_states = hidden_states
@@ -155,13 +155,14 @@ class Model(nn.Module):
     def __init__(self, device, hidden_size, num_label, max_length=100, dropout_rate=0.3):
         super(Model, self).__init__()
         self.device = device
+        self.lstm = nn.LSTM(input_size=hidden_size, hidden_size=hidden_size, num_layers=1, bidirectional=True)
         self.context_encoder = ContextEncoder(device=device, seq_length=max_length)
         
-        self.gate1 = nn.Linear(hidden_size * 2, 100)
-        self.gate2 = nn.Linear(hidden_size * 2, 100)
+        self.gate1 = nn.Linear(hidden_size * 4, hidden_size)
+        self.gate2 = nn.Linear(hidden_size * 4, hidden_size)
 
         self.dropout = nn.Dropout(dropout_rate)
-        self.fc_1 = nn.Linear(100, num_label)
+        self.fc_1 = nn.Linear(hidden_size, num_label)
         self.softmax = nn.Softmax(dim=0)
 
     
@@ -170,11 +171,11 @@ class Model(nn.Module):
     
     def forward(self, U, umask):
         sentence_length = umask.shape[0]
-        utterances = U
+        utterances, _ = self.lstm(U.to(self.device))
         logits = torch.zeros(0).type(U.type()) # batch, D_e
         logits = logits.to(self.device)
         umask = umask.to(self.device)
-    
+        
         for idx in range(sentence_length):
             pre_utterances, post_utterances, target_utterances, pre_umask, post_umask = self.data_preprocess2(utterances=utterances, idx=idx, umask=umask)
             pre_utterances=pre_utterances.to(self.device)
