@@ -24,6 +24,7 @@ class IEMOCAPDataset(Dataset):
                torch.FloatTensor([1]*len(self.videoLabels[vid])),\
                torch.LongTensor(self.videoLabels[vid]),\
                torch.LongTensor([0 if x == 'M' else 1 for x in self.videoSpeakers[vid]]),\
+               torch.FloatTensor([[1,0] if x == 'M' else [0,1] for x in self.videoSpeakers[vid]]),\
                vid
 
     def getSpeakerList(self, vid):
@@ -50,7 +51,7 @@ class IEMOCAPDataset(Dataset):
     def collate_fn(self, data):
         dat = pd.DataFrame(data)
 
-        return [pad_sequence(dat[i]) if i<4 else dat[i].tolist() for i in dat]
+        return [pad_sequence(dat[i]) if i<5 else dat[i].tolist() for i in dat]
 
 if __name__ == '__main__':
     dataset = IEMOCAPDataset()
