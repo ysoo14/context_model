@@ -23,7 +23,7 @@ class IEMOCAPDataset(Dataset):
         return torch.FloatTensor(self.videoText[vid]),\
                torch.FloatTensor([1]*len(self.videoLabels[vid])),\
                torch.LongTensor(self.videoLabels[vid]),\
-               torch.LongTensor([1 if x == 'M' else 2 for x in self.videoSpeakers[vid]]),\
+               torch.LongTensor([0 if x == 'M' else 1 for x in self.videoSpeakers[vid]]),\
                vid
 
     def getSpeakerList(self, vid):

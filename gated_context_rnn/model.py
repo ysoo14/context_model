@@ -139,7 +139,7 @@ class ContextEncoder(nn.Module):
         pos = pos * umask_
         x = x + pos
         transformer_outputs = self.transformer(x, umask)
-        residual_outputs = transformer_outputs[-1] + x
+        residual_outputs = transformer_outputs[-1]
 
         hidden_states, _ = self.lstm(residual_outputs)
         hidden_states = hidden_states
@@ -155,37 +155,133 @@ class Model(nn.Module):
     def __init__(self, device, hidden_size, num_label, max_length=100, dropout_rate=0.3):
         super(Model, self).__init__()
         self.device = device
-        self.context_encoder = ContextEncoder(device=device, seq_length=max_length)
-        
+        self.context_encoder1 = ContextEncoder(device=device, seq_length=max_length)
+        self.context_encoder2 = ContextEncoder(device=device, seq_length=max_length)
+        self.context_encoder3 = ContextEncoder(device=device, seq_length=max_length)
+        self.context_encoder4 = ContextEncoder(device=device, seq_length=max_length)
+
         self.gate1 = nn.Linear(hidden_size * 2, 100)
         self.gate2 = nn.Linear(hidden_size * 2, 100)
+        self.gate3 = nn.Linear(hidden_size * 2, 100)
+        self.gate4 = nn.Linear(hidden_size * 2, 100)
 
         self.dropout = nn.Dropout(dropout_rate)
-        self.fc_1 = nn.Linear(100, num_label)
+        self.fc_1 = nn.Linear(400, num_label)
         self.softmax = nn.Softmax(dim=0)
 
-    
+    def data_preprocess_batch(self, utterances, idx, umask, speaker):
+        batch_size = utterances.shape[1]
+        ones = torch.ones(umask.shape[0], dtype=torch.int32, device=self.device)
+        self_u = torch.zeros(0).type(utterances.type()).to(self.device) # batch, D_e
+        inter_u = torch.zeros(0).type(utterances.type()).to(self.device) # batch, D_e
+        self_speakers = torch.zeros(0).type(umask.type()).to(self.device) # batch, D_e
+        inter_speakers = torch.zeros(0).type(umask.type()).to(self.device) # batch, D_e
+
+        speaker = speaker.permute(1,0).to(self.device)
+        utterances = utterances.permute(1,0,2).to(self.device)
+        umask = umask.permute(1,0)
+        
+        for i in range(0, batch_size):
+            target_utterance = utterances[i][idx].to(self.device)
+
+            if speaker[i][idx] == 0:
+                inter_speaker = speaker[i]
+                self_speaker = ones - speaker[i]
+                self_speaker = self_speaker.unsqueeze(1)
+                inter_speaker = inter_speaker.unsqueeze(1)
+                self_utterances = utterances[i] * self_speaker
+                inter_utterances = utterances[i] * inter_speaker
+
+            else:
+                self_speaker = speaker[i]
+                inter_speaker = ones - speaker[i]
+                self_speaker = self_speaker.unsqueeze(1)
+                inter_speaker = inter_speaker.unsqueeze(1)
+                self_utterances = utterances[i] * self_speaker
+                inter_utterances = utterances[i] * inter_speaker
+
+            umask_ = umask[i].unsqueeze(1)
+            self_utterances = self_utterances * umask_
+            inter_utterances = inter_utterances * umask_
+
+            self_utterances = self_utterances.unsqueeze(1)
+            inter_utterances = inter_utterances.unsqueeze(1)
+            inter_utterances[idx] = target_utterance
+            inter_speaker[idx] = 1
+            self_u = torch.cat([self_u, self_utterances], 1)
+            inter_u = torch.cat([inter_u, inter_utterances], 1)
+            self_speakers = torch.cat([self_speakers, self_speaker], 1)
+            inter_speakers = torch.cat([inter_speakers, inter_speaker], 1)
+
+        utterances = utterances.permute(1,0,2)
+        umask = umask.permute(1,0)
+
+        return self_u[:idx+1], self_u[idx:], inter_u[:idx+1], self_speakers[:idx+1], self_speakers[idx:], inter_speakers[:idx+1], utterances[:idx+1], umask[:idx+1]
+
+    def data_preprocess(self, utterances, idx, umask, speaker):
+        batch_size = utterances.shape[1]
+        ones = torch.ones(umask.shape, dtype=torch.int32, device=self.device)
+        print(ones.shape)
+        speaker = speaker.to(self.device)
+        target_utterance = utterances[idx].to(self.device)
+        print(utterances.shape)
+        print(umask.shape)
+        print(speaker.shape)
+        utterances = utterances.permute(1,0,2).to(self.device)
+
+        if speaker[idx] == 0:
+            inter_speaker = speaker
+            speaker = ones - speaker
+            self_utterances = utterances * speaker
+            inter_utterances = utterances * inter_speaker
+
+        else:
+            speaker = speaker
+            inter_speaker = ones - speaker
+            self_utterances = utterances * speaker
+            inter_utterances = utterances * inter_speaker
+        
+        self_utterances = self_utterances * umask
+        inter_utterances = inter_utterances * umask
+
+        self_utterances = self_utterances.permute(1,0,2)
+        inter_utterances = inter_utterances.permute(1,0,2)
+        utterances = utterances.permute(1,0,2)
+        inter_utterances[idx] = target_utterance
+
+        inter_speaker[idx] = 1
+
+        return self_utterances[:idx+1], self_utterances[idx:], inter_utterances[:idx+1], speaker[:idx+1], speaker[idx:], inter_speaker[:idx+1], utterances[:idx+1], umask[:idx+1]
+
     def data_preprocess2(self, utterances, idx, umask):
         return utterances[:idx+1], utterances[idx:], utterances[idx], umask[:idx+1], umask[idx:]
     
-    def forward(self, U, umask):
+    def forward(self, U, umask, speaker):
         sentence_length = umask.shape[0]
         utterances = U
         logits = torch.zeros(0).type(U.type()) # batch, D_e
         logits = logits.to(self.device)
         umask = umask.to(self.device)
-    
         for idx in range(sentence_length):
-            pre_utterances, post_utterances, target_utterances, pre_umask, post_umask = self.data_preprocess2(utterances=utterances, idx=idx, umask=umask)
-            pre_utterances=pre_utterances.to(self.device)
-            post_utterances=post_utterances.to(self.device)
+            #pre_utterances, post_utterances, target_utterances, pre_umask, post_umask = self.data_preprocess2(utterances=utterances, idx=idx, umask=umask)
+            pre_self_utterances, post_self_utterances,pre_inter_utterances, pre_self_umask, post_self_umask, pre_inter_umask, pre_utterances, pre_mask = self.data_preprocess_batch(utterances=utterances, idx=idx, umask=umask, speaker=speaker)
+            pre_self_utterances=pre_self_utterances.to(self.device)
+            post_self_utterances = post_self_utterances.to(self.device)
+            pre_inter_utterances=pre_inter_utterances.to(self.device)
 
-            pre_context = self.context_encoder(pre_utterances, pre_umask)
-            post_context = self.context_encoder(post_utterances, post_umask, True)
+            pre_self_context = self.context_encoder1(pre_self_utterances, pre_self_umask)
+            post_self_context = self.context_encoder1(post_self_utterances, post_self_umask, True)
+            pre_inter_context = self.context_encoder1(pre_inter_utterances, pre_inter_umask)
+            pre_global_context = self.context_encoder1(pre_utterances, pre_mask)
+
+            pre_self_context = self.gate1(pre_self_context)
+            post_self_context = self.gate1(post_self_context)
+            pre_inter_context = self.gate1(pre_inter_context)
+            pre_global_context = self.gate1(pre_global_context)
+
+            inertia_vector = torch.cat([pre_self_context, post_self_context, pre_inter_context, pre_global_context], -1)
             
-            pre_context = self.gate1(pre_context)
-            post_context = self.gate2(post_context)
-            context = F.tanh(pre_context + post_context)
+            context = F.tanh(inertia_vector)
             context = self.dropout(context)
             context = self.fc_1(context)
             logit =F.log_softmax(context, -1)
