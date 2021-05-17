@@ -1,6 +1,7 @@
 import copy
 import math
 import numpy as np
+from numpy.testing._private.utils import requires_memory
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -160,32 +161,37 @@ class Model(nn.Module):
         self.context_encoder3 = ContextEncoder(device=device, seq_length=max_length)
         self.context_encoder4 = ContextEncoder(device=device, seq_length=max_length)
 
+        self.speaker_embedding = nn.Linear(2, 100)
+
         self.gate1 = nn.Linear(hidden_size * 2, 100)
         self.gate2 = nn.Linear(hidden_size * 2, 100)
         self.gate3 = nn.Linear(hidden_size * 2, 100)
         self.gate4 = nn.Linear(hidden_size * 2, 100)
 
         self.dropout = nn.Dropout(dropout_rate)
-        self.fc_1 = nn.Linear(400, num_label)
+        self.fc_1 = nn.Linear(300, num_label)
         self.softmax = nn.Softmax(dim=0)
 
     def data_preprocess_batch(self, utterances, idx, umask, speaker):
         batch_size = utterances.shape[1]
         ones = torch.ones(umask.shape[0], dtype=torch.int32, device=self.device)
+        one = torch.ones(1, dtype=torch.int32, device=self.device)
+
         self_u = torch.zeros(0).type(utterances.type()).to(self.device) # batch, D_e
         inter_u = torch.zeros(0).type(utterances.type()).to(self.device) # batch, D_e
         self_speakers = torch.zeros(0).type(umask.type()).to(self.device) # batch, D_e
         inter_speakers = torch.zeros(0).type(umask.type()).to(self.device) # batch, D_e
 
         speaker = speaker.permute(1,0).to(self.device)
-        utterances = utterances.permute(1,0,2).to(self.device)
+        utterances = utterances.permute(1,0,2)
         umask = umask.permute(1,0)
         
         for i in range(0, batch_size):
             target_utterance = utterances[i][idx].to(self.device)
 
             if speaker[i][idx] == 0:
-                inter_speaker = speaker[i]
+                inter_speaker = speaker[i].clone()
+                inter_speaker[idx] = inter_speaker[idx] + 1
                 self_speaker = ones - speaker[i]
                 self_speaker = self_speaker.unsqueeze(1)
                 inter_speaker = inter_speaker.unsqueeze(1)
@@ -195,6 +201,7 @@ class Model(nn.Module):
             else:
                 self_speaker = speaker[i]
                 inter_speaker = ones - speaker[i]
+                inter_speaker[idx] = inter_speaker[idx] + 1
                 self_speaker = self_speaker.unsqueeze(1)
                 inter_speaker = inter_speaker.unsqueeze(1)
                 self_utterances = utterances[i] * self_speaker
@@ -206,8 +213,7 @@ class Model(nn.Module):
 
             self_utterances = self_utterances.unsqueeze(1)
             inter_utterances = inter_utterances.unsqueeze(1)
-            inter_utterances[idx] = target_utterance
-            inter_speaker[idx] = 1
+
             self_u = torch.cat([self_u, self_utterances], 1)
             inter_u = torch.cat([inter_u, inter_utterances], 1)
             self_speakers = torch.cat([self_speakers, self_speaker], 1)
@@ -221,12 +227,9 @@ class Model(nn.Module):
     def data_preprocess(self, utterances, idx, umask, speaker):
         batch_size = utterances.shape[1]
         ones = torch.ones(umask.shape, dtype=torch.int32, device=self.device)
-        print(ones.shape)
         speaker = speaker.to(self.device)
         target_utterance = utterances[idx].to(self.device)
-        print(utterances.shape)
-        print(umask.shape)
-        print(speaker.shape)
+
         utterances = utterances.permute(1,0,2).to(self.device)
 
         if speaker[idx] == 0:
@@ -256,12 +259,16 @@ class Model(nn.Module):
     def data_preprocess2(self, utterances, idx, umask):
         return utterances[:idx+1], utterances[idx:], utterances[idx], umask[:idx+1], umask[idx:]
     
-    def forward(self, U, umask, speaker):
+    def forward(self, U, umask, speaker, s_embedding):
         sentence_length = umask.shape[0]
-        utterances = U
+        s_embedding = s_embedding.to(self.device)
+        s_embedded = self.speaker_embedding(s_embedding)
+        s_embedded = s_embedded.to(self.device)
+        utterances = U.to(self.device) + s_embedded.to(self.device)
         logits = torch.zeros(0).type(U.type()) # batch, D_e
         logits = logits.to(self.device)
         umask = umask.to(self.device)
+
         for idx in range(sentence_length):
             #pre_utterances, post_utterances, target_utterances, pre_umask, post_umask = self.data_preprocess2(utterances=utterances, idx=idx, umask=umask)
             pre_self_utterances, post_self_utterances,pre_inter_utterances, pre_self_umask, post_self_umask, pre_inter_umask, pre_utterances, pre_mask = self.data_preprocess_batch(utterances=utterances, idx=idx, umask=umask, speaker=speaker)
@@ -279,7 +286,7 @@ class Model(nn.Module):
             pre_inter_context = self.gate1(pre_inter_context)
             pre_global_context = self.gate1(pre_global_context)
 
-            inertia_vector = torch.cat([pre_self_context, post_self_context, pre_inter_context, pre_global_context], -1)
+            inertia_vector = torch.cat([pre_self_context, post_self_context, pre_inter_context], -1)
             
             context = F.tanh(inertia_vector)
             context = self.dropout(context)
